@@ -42,15 +42,15 @@ Each gesture can be mapped to a user-defined keyboard shortcut.
 
 ## System Architecture
 Webcam Input
-↓
+->
 Frame Capture (OpenCV)
-↓
+->
 Hand Landmark Detection (MediaPipe)
-↓
+->
 Gesture Recognition
-↓
+->
 Shortcut Mapping
-↓
+->
 Keyboard Shortcut Execution
 
 
@@ -107,5 +107,5 @@ By replacing traditional input devices with intuitive hand gestures, the project
 ---
 
 ## Author
-Developed by [MIR]
-NUCES'27
+ -Developed by MEE BRUHH DUHH
+ -NUCES'27 
