@@ -1,7 +1,16 @@
+# This Python code snippet is using the OpenCV library (`cv2`) and the MediaPipe library (`mediapipe`)
+# to perform hand gesture recognition using a webcam feed. Here is a breakdown of what the code is
+# doing:
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+import time
+import json
+import pyautogui
+
+
+pyautogui.FAILSAFE = True
 
 base_options = python.BaseOptions(
     model_asset_path='hand_landmarker.task'
@@ -22,6 +31,34 @@ detector = vision.HandLandmarker.create_from_options(options)
 
 
 cap = cv2.VideoCapture(0)
+fingers = []
+
+last_gesture = None
+last_time = 0
+COOLDOWN = 2.0 #seconds 
+
+def get_gesture(fingers):
+    if fingers == [1,1,1,1,1]:
+         return "OPEN_PALM"
+    elif fingers == [0,0,0,0,0]:
+        return "FIST"
+    elif fingers == [0,1,1,0,0]:
+        return "TWO_FINGERS"
+    elif fingers == [1,0,0,0,0]:
+         return "THUMB"
+    else:
+        return "UNKNOWN"
+    
+
+with open("config.json", "r") as f:
+    gesture_map = json.load(f)
+    
+prev_wrist_x = None
+prev_wrist_y = None
+
+SWIPE_THRESHOLD = 0.08   # tune later
+
+
 
 while True:
     success, frame = cap.read()
@@ -36,9 +73,44 @@ while True:
         data=rgb_frame
     )
     result = detector.detect(mp_image)
+    gesture = "UNKNOWN"
+
     
+    # gesture = get_gesture(fingers)
+    
+    cv2.putText(
+        frame,
+        f"Gesture: {gesture}",
+        (30,120),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (255,255,255),
+        2
+    )
     if result.hand_landmarks:
         for hand_landmarks in result.hand_landmarks:
+            wrist = hand_landmarks[0]
+            current_x = wrist.x
+            current_y = wrist.y
+            
+            swipe = None
+            if prev_wrist_x is not None and prev_wrist_y is not None:
+                dx = current_x - prev_wrist_x
+                dy = current_y - prev_wrist_y
+                
+                if abs(dx) > abs(dy):
+                    if dx > SWIPE_THRESHOLD:
+                        swipe = "SWIPE_RIGHT"
+                    elif dx < -SWIPE_THRESHOLD:
+                        swipe = "SWIPE_LEFT"
+                else:
+                    if dy > SWIPE_THRESHOLD:
+                        swipe = "SWIPE_DOWN"
+                    elif dy < -SWIPE_THRESHOLD:
+                        swipe = "SWIPE_UP"
+            prev_wrist_x = current_x
+            prev_wrist_y = current_y
+
             fingers = []
            
             #Thumb
@@ -70,20 +142,36 @@ while True:
             pinky_tip = hand_landmarks[20]
             pinky_pip = hand_landmarks[18]
             fingers.append(1 if pinky_tip.y < pinky_pip.y else 0)
+
+            gesture = get_gesture(fingers)
+    
+            gesture = get_gesture(fingers)
+            event = swipe if swipe else gesture
+
+            # SO like it should not spam like a simp spam texting to his ignorant gf
+            # COOLDOWN var default 1 sec (its good) 
+            current_time = time.time()
             
-            cv2.putText(
-                frame,
-                f"Fingers: {fingers}",
-                (30,80),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (255,255,0),
-                2  
-            )
+            if event and event != "UNKNOWN":
+                if event != last_gesture and (current_time - last_time) > COOLDOWN:
+                    if event in gesture_map:
+                        # keys = gesture_map[event]
+                        pyautogui.hotkey(*gesture_map[event])
+
+                    last_gesture = event
+                    last_time = current_time
+            
+            # Finger Array - Good for like to see fingers are OKAY
+            # cv2.putText(
+            #     frame,
+            #     f"Fingers: {fingers}",
+            #     (30,80),
+            #     cv2.FONT_HERSHEY_SIMPLEX,
+            #     0.8,
+            #     (255,255,0),
+            #     2  
+            # )
              
-            
-            
-            
             
             #Initially when I was testing 
             # middle_tip = hand_landmarks[12]
@@ -113,6 +201,9 @@ while True:
     #             frame,
     #             hand_landmarks, mp_hands.HAND_CONNECTIONS
     #         )
+    
+    
+    
     cv2.imshow("Webcam Feed", frame)
     
     if cv2.waitKey(1) & 0xFF == ord('q'):

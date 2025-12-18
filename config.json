@@ -1,0 +1,6 @@
+{
+  "SWIPE_RIGHT": ["ctrl", "tab"],
+  "SWIPE_LEFT": ["ctrl", "shift", "tab"],
+  "SWIPE_UP": ["pageup"],
+  "SWIPE_DOWN": ["pagedown"]
+}
