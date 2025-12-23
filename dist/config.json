@@ -1,0 +1,27 @@
+{
+    "default": {
+        "TWO_FINGERS": [
+            "k"
+        ],
+        "THUMB": [
+            "m"
+        ],
+        "SWIPE_LEFT": [
+            "alt",
+            "left"
+        ],
+        "SWIPE_RIGHT": [
+            "alt",
+            "right"
+        ]
+    },
+    "chrome": {
+        "TWO_FINGERS": [
+            "k"
+        ],
+        "FIST": [
+            "ctrl",
+            "tab"
+        ]
+    }
+}

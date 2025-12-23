@@ -1,6 +1,38 @@
 {
-  "SWIPE_RIGHT": ["ctrl", "tab"],
-  "SWIPE_LEFT": ["ctrl", "shift", "tab"],
-  "SWIPE_UP": ["pageup"],
-  "SWIPE_DOWN": ["pagedown"]
+    "default": {
+        "TWO_FINGERS": [
+            "k"
+        ],
+        "SWIPE_LEFT": [
+            "alt",
+            "left"
+        ],
+        "SWIPE_RIGHT": [
+            "alt",
+            "right"
+        ],
+        "SWIPE_UP": [
+            "volumeup",
+            "volumeup",
+            "volumeup",
+            "volumeup",
+            "volumeup"
+        ],
+        "SWIPE_DOWN": [
+            "volumedown",
+            "volumedown",
+            "volumedown",
+            "volumedown",
+            "volumedown"
+        ]
+    },
+    "chrome": {
+        "TWO_FINGERS": [
+            "k"
+        ],
+        "FIST": [
+            "ctrl",
+            "tab"
+        ]
+    }
 }

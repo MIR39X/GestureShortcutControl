@@ -1,213 +1,187 @@
-# This Python code snippet is using the OpenCV library (`cv2`) and the MediaPipe library (`mediapipe`)
-# to perform hand gesture recognition using a webcam feed. Here is a breakdown of what the code is
-# doing:
 import cv2
-import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
+import threading
 import time
-import json
-import pyautogui
+import os
+from src.camera import Camera
+from src.detector import HandDetector
+from src.config_manager import ConfigManager
+from src.input_controller import InputController
+from src.gui import SettingsGUI
+from src.tray_icon import TrayIcon
+from src.overlay import Overlay
 
+from src.mouse_controller import MouseController
 
-pyautogui.FAILSAFE = True
+class LazyHandsApp:
+    def __init__(self):
+        self.config_manager = ConfigManager()
+        self.camera = None
+        self.detector = None
+        self.input_controller = None
+        self.mouse_controller = None
+        self.running = True
+        self.gui = None
+        self.tray = None
+        
+        self.mode = "GESTURE" # GESTURE or MOUSE
+        self.last_mode_toggle = 0
 
-base_options = python.BaseOptions(
-    model_asset_path='hand_landmarker.task'
-    )
-
-options = vision.HandLandmarkerOptions(
-    base_options=base_options,
-    num_hands=1
-)
-
-detector = vision.HandLandmarker.create_from_options(options)
-# hands = mp_hands.Hands(
-#     static_image_mode=False,
-#     max_num_hands=2,
-#     min_detection_confidence=0.7,
-#     min_tracking_confidence=0.7
-# )
-
-
-cap = cv2.VideoCapture(0)
-fingers = []
-
-last_gesture = None
-last_time = 0
-COOLDOWN = 2.0 #seconds 
-
-def get_gesture(fingers):
-    if fingers == [1,1,1,1,1]:
-         return "OPEN_PALM"
-    elif fingers == [0,0,0,0,0]:
-        return "FIST"
-    elif fingers == [0,1,1,0,0]:
-        return "TWO_FINGERS"
-    elif fingers == [1,0,0,0,0]:
-         return "THUMB"
-    else:
-        return "UNKNOWN"
-    
-
-with open("config.json", "r") as f:
-    gesture_map = json.load(f)
-    
-prev_wrist_x = None
-prev_wrist_y = None
-
-SWIPE_THRESHOLD = 0.08   # tune later
-
-
-
-while True:
-    success, frame = cap.read()
-    if not success:
-        print("Failed to capture image")
-        break
-    
-    frame = cv2.flip(frame, 1) # Mirror the frame
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(
-        image_format=mp.ImageFormat.SRGB,
-        data=rgb_frame
-    )
-    result = detector.detect(mp_image)
-    gesture = "UNKNOWN"
-
-    
-    # gesture = get_gesture(fingers)
-    
-    cv2.putText(
-        frame,
-        f"Gesture: {gesture}",
-        (30,120),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
-        (255,255,255),
-        2
-    )
-    if result.hand_landmarks:
-        for hand_landmarks in result.hand_landmarks:
-            wrist = hand_landmarks[0]
-            current_x = wrist.x
-            current_y = wrist.y
+    def detection_loop(self):
+        try:
+            self.camera = Camera()
+            self.detector = HandDetector()
+            # Overlay is initialized in run() and assigned to self.overlay
+            self.input_controller = InputController(self.config_manager, self.overlay)
+            self.mouse_controller = MouseController()
             
-            swipe = None
-            if prev_wrist_x is not None and prev_wrist_y is not None:
-                dx = current_x - prev_wrist_x
-                dy = current_y - prev_wrist_y
-                
-                if abs(dx) > abs(dy):
-                    if dx > SWIPE_THRESHOLD:
-                        swipe = "SWIPE_RIGHT"
-                    elif dx < -SWIPE_THRESHOLD:
-                        swipe = "SWIPE_LEFT"
+            print("Detection Loop Started")
+            
+            while self.running:
+                # If GUI is destroyed (app closing), stop
+                if self.gui and not self.gui.is_running:
+                     break
+
+                frame = self.camera.read_frame()
+                if frame is None:
+                    time.sleep(0.1)
+                    continue
+
+                result = self.detector.detect(frame)
+                gesture_name = "UNKNOWN"
+                event_to_show = f"Mode: {self.mode}"
+
+                if result.hand_landmarks:
+                    for hand_landmarks in result.hand_landmarks:
+                        fingers = self.detector.get_fingers_state(hand_landmarks)
+                        gesture_name = self.detector.recognize_gesture(fingers)
+                        
+                        # Mode Toggle Logic (ROCK gesture)
+                        current_time = time.time()
+                        if gesture_name == "ROCK" and (current_time - self.last_mode_toggle) > 2.0:
+                            self.mode = "MOUSE" if self.mode == "GESTURE" else "GESTURE"
+                            self.last_mode_toggle = current_time
+                            self.mouse_controller.reset()
+                            event_to_show = f"SWITCHED TO {self.mode}"
+                        
+                        if self.mode == "MOUSE":
+                            # Strict Safety Check: Only move/click if Middle/Ring/Pinky are DOWN
+                            # This prevents 'Open Palm' or 'Fist' from simulating a mouse
+                            if self.detector.is_pointing(fingers):
+                                # Mouse Logic - Relative Movement
+                                ix, iy = self.detector.get_index_tip_pos(hand_landmarks)
+                                self.mouse_controller.move(ix, iy)
+                                
+                                # Clicking
+                                dist = self.detector.detect_pinch(hand_landmarks)
+                                self.mouse_controller.check_and_click(dist)
+                                
+                                # Visual Click Feedback
+                                if dist < self.mouse_controller.PINCH_THRESHOLD: 
+                                    h, w, _ = frame.shape
+                                    thumb = hand_landmarks[4]
+                                    index = hand_landmarks[8]
+                                    tx, ty = int(thumb.x * w), int(thumb.y * h)
+                                    idx, idy = int(index.x * w), int(index.y * h)
+                                    cv2.line(frame, (tx, ty), (idx, idy), (0, 0, 255), 3)
+                                    cv2.putText(frame, "CLICK", (idx, idy - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                            else:
+                                # If not pointing strictly, reset tracker so we don't jump when we start pointing again
+                                self.mouse_controller.reset()
+                                cv2.putText(frame, "PAUSED (Point Filter)", (30, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                            
+                        else:
+                            # Gesture Logic
+                            swipe = self.detector.detect_swipe(hand_landmarks)
+                            final_event = swipe if swipe else gesture_name
+                            
+                            if final_event == "ROCK": 
+                                final_event = "TOGGLING..." # Feedback
+                            else:
+                                event_to_show = f"{self.mode}: {final_event}"
+
+                            if final_event and final_event != "UNKNOWN" and final_event != "ROCK":
+                                self.input_controller.execute_action(final_event)
+                        
+                        # Draw landmarks
+                        h, w, _ = frame.shape
+                        for landmark in hand_landmarks:
+                            x = int(landmark.x * w)
+                            y = int(landmark.y * h)
+                            cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
                 else:
-                    if dy > SWIPE_THRESHOLD:
-                        swipe = "SWIPE_DOWN"
-                    elif dy < -SWIPE_THRESHOLD:
-                        swipe = "SWIPE_UP"
-            prev_wrist_x = current_x
-            prev_wrist_y = current_y
+                    # Reset mouse tracking if hand is lost
+                    if self.mouse_controller:
+                        self.mouse_controller.reset()
 
-            fingers = []
-           
-            #Thumb
-            thumb_tip = hand_landmarks[4]
-            thumb_pip = hand_landmarks[3]
+                # Show camera preview
+                cv2.putText(
+                    frame,
+                    event_to_show,
+                    (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 255) if self.mode == "MOUSE" else (255, 255, 0),
+                    2
+                ) 
+                cv2.imshow("LazyHands - Cam View", frame)
+                
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    self.quit_app()
+                    break
             
-            if thumb_tip.x < thumb_pip.x:
-                fingers.append(1)
-            else:
-                fingers.append(0)
-            # ROOKIE MISTAKE fingers.append(1 if thumb_tip.x < thumb_pip.x else 0)
+            self.camera.release()
+            cv2.destroyAllWindows()
             
-            # Index Finger
-            index_tip = hand_landmarks[8]
-            index_pip = hand_landmarks[6]
-            fingers.append(1 if index_tip.y < index_pip.y else 0)
-            
-            # Middle finger
-            middle_tip = hand_landmarks[12]
-            middle_pip = hand_landmarks[10]
-            fingers.append(1 if middle_tip.y < middle_pip.y else 0)
-            
-            # RING finger
-            r_tip = hand_landmarks[16]
-            r_pip = hand_landmarks[14]
-            fingers.append(1 if r_tip.y < r_pip.y else 0)
-            
-            # Pinky finger
-            pinky_tip = hand_landmarks[20]
-            pinky_pip = hand_landmarks[18]
-            fingers.append(1 if pinky_tip.y < pinky_pip.y else 0)
+        except Exception as e:
+            import traceback
+            import datetime
+            with open("crash_log.txt", "a") as f:
+                f.write(f"\n[{datetime.datetime.now()}] Error: {str(e)}\n")
+                f.write(traceback.format_exc())
+            print(f"Error in detection loop: {e}")
 
-            gesture = get_gesture(fingers)
-    
-            gesture = get_gesture(fingers)
-            event = swipe if swipe else gesture
+    def quit_app(self):
+        self.running = False
+        if self.tray:
+            self.tray.icon.stop()
+        
+        # Schedule GUI destruction on main thread
+        if self.gui:
+            self.gui.after(0, self.gui.quit_app)
 
-            # SO like it should not spam like a simp spam texting to his ignorant gf
-            # COOLDOWN var default 1 sec (its good) 
-            current_time = time.time()
-            
-            if event and event != "UNKNOWN":
-                if event != last_gesture and (current_time - last_time) > COOLDOWN:
-                    if event in gesture_map:
-                        # keys = gesture_map[event]
-                        pyautogui.hotkey(*gesture_map[event])
+    def run(self):
+        # 1. Initialize GUI (Main Thread)
+        self.gui = SettingsGUI(self.config_manager, None)
+        self.gui.protocol("WM_DELETE_WINDOW", self.gui.on_close)
+        
+        # Initialize Overlay (requires GUI root)
+        self.overlay = Overlay(self.gui)
+        
+        # 2. Setup Tray (Background Thread)
+        def on_settings():
+            self.gui.after(0, self.gui.show) # call show on main thread via after
 
-                    last_gesture = event
-                    last_time = current_time
-            
-            # Finger Array - Good for like to see fingers are OKAY
-            # cv2.putText(
-            #     frame,
-            #     f"Fingers: {fingers}",
-            #     (30,80),
-            #     cv2.FONT_HERSHEY_SIMPLEX,
-            #     0.8,
-            #     (255,255,0),
-            #     2  
-            # )
-             
-            
-            #Initially when I was testing 
-            # middle_tip = hand_landmarks[12]
-            # middle_pip = hand_landmarks[10]
-            
-            # if middle_tip.y < middle_pip.y:
-            #     cv2.putText(frame, "FUCK YOU BITCHASS", (30,50),
-            #                 cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 2)
-            # else:
-            #     cv2.putText(frame, "NAH YOU GOOD", (30,50),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255),2)
-            
-            for landmark in hand_landmarks:
-              h, w, _ = frame.shape
-              x = int(landmark.x * w)
-              y = int(landmark.y * h)
-              cv2.circle(frame, (x,y), 5, (0, 255, 0), -1)
-              
-    #ignore this fucking code because google removed type shi 
-    # so I had to call cv api type shi
-    # rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # results = hands.process(rgb_frame)
-    # if results.multi_hand_landmarks:
-    #     for hand_landmarks in results.multi_hand_landmarks:
-    #         mp_draw.draw_landmarks
-    #         (
-    #             frame,
-    #             hand_landmarks, mp_hands.HAND_CONNECTIONS
-    #         )
-    
-    
-    
-    cv2.imshow("Webcam Feed", frame)
-    
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-    
-cap.release()
-cv2.destroyAllWindows()
+        def on_quit():
+            # Run quit_app logic
+            self.quit_app()
+
+        self.tray = TrayIcon(on_settings, on_quit)
+        self.tray.run_detached()
+
+        # 3. Start Detection (Background Thread)
+        thread = threading.Thread(target=self.detection_loop, daemon=True)
+        thread.start()
+        
+        # 4. Run GUI Main Loop
+        print("LazyHands is running found in System Tray.")
+        try:
+            self.gui.mainloop()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.running = False
+
+
+if __name__ == "__main__":
+    app = LazyHandsApp()
+    app.run()

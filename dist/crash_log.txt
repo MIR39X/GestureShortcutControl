@@ -1,0 +1,16 @@
+
+[2025-12-23 23:57:24.535868] Error: No module named 'mediapipe.tasks.c'
+Traceback (most recent call last):
+  File "main.py", line 32, in detection_loop
+  File "src\detector.py", line 21, in __init__
+  File "mediapipe\tasks\python\vision\hand_landmarker.py", line 395, in create_from_options
+  File "mediapipe\tasks\python\core\mediapipe_c_bindings.py", line 83, in load_shared_library
+  File "mediapipe\tasks\python\core\mediapipe_c_bindings.py", line 52, in load_raw_library
+  File "importlib\resources\_common.py", line 22, in files
+  File "importlib\resources\_common.py", line 53, in get_package
+  File "importlib\resources\_common.py", line 44, in resolve
+  File "importlib\__init__.py", line 126, in import_module
+  File "<frozen importlib._bootstrap>", line 1206, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1178, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1142, in _find_and_load_unlocked
+ModuleNotFoundError: No module named 'mediapipe.tasks.c'
