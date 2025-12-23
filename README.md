@@ -107,5 +107,4 @@ By replacing traditional input devices with intuitive hand gestures, the project
 ---
 
 ## Author
- -Developed by MEE BRUHH DUHH
- -NUCES'27 
+ -Developed by MEE BRUHH DUHH - NUCES'27 
